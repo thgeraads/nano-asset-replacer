@@ -1,5 +1,6 @@
 <script setup>
 import {ref} from 'vue';
+import JSZip from 'jszip';
 
 const props = defineProps({
   device: {
@@ -9,16 +10,53 @@ const props = defineProps({
   loaded: {
     type: Boolean,
     required: true
+  },
+  modified: {
+    type: Array,
+    default: () => []
   }
 })
 
+const downloadModifiedPNGs = async () => {
+  if (!props.modified.length) return;
 
-const emit = defineEmits(['update:device']);
+  const zip = new JSZip();
+
+  for (const img of props.modified) {
+    const base64 = img.modifiedDataURL.split(',')[1];
+    const binary = atob(base64);
+    const uint8Array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      uint8Array[i] = binary.charCodeAt(i);
+    }
+
+    zip.file(`${img.fullId}.png`, uint8Array);
+  }
+
+  const blob = await zip.generateAsync({type: 'blob'});
+
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `modified-assets-${props.device}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+};
+
+const emit = defineEmits(['update:device', 'copy-from-origin']);
+
 const selectDevice = (device) => {
   if (props.device !== device) {
     emit('update:device', device);
   }
 };
+
+const copyFromOrigin = () => {
+  if (!props.loaded) return;
+  emit('copy-from-origin');
+};
+
+
 </script>
 
 <template>
@@ -45,8 +83,9 @@ const selectDevice = (device) => {
     <div class="themeControls">
       <p class="exportLabel">Asset options</p>
       <a
-          class="copyFromOriginButton"
+          class="btn-pri copyFromOriginButton"
           :class="{disabled: !props.loaded }"
+          @click="copyFromOrigin"
       >Copy all from origin</a>
     </div>
 
@@ -56,25 +95,26 @@ const selectDevice = (device) => {
 
       <div class="buildButtons">
         <a v-if="props.device === '6g'"
-           class="buildButton"
+           class="btn-pri buildButton"
            :class="{disabled: !props.loaded }"
         >
           Build for 6G
         </a>
         <a v-if="props.device === '7g'"
-           class="buildButton"
+           class="btn-pri buildButton"
            :class="{disabled: !props.loaded }">
           Build 7G (2012)
         </a>
         <a
             v-if="props.device === '7g'"
-            class="buildButton"
+            class="btn-pri buildButton"
             :class="{disabled: !props.loaded }">
           Build 7G (2015)
         </a>
         <a
-            class="buildButton"
-            :class="{disabled: !props.loaded }">
+            class="btn-pri buildButton"
+            :class="{disabled: !props.loaded }"
+            @click="downloadModifiedPNGs">
           Export modified .PNGs
         </a>
       </div>

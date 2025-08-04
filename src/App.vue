@@ -7,10 +7,21 @@ import {extractFilteredImages} from "./utils/unpack.js";
 import {createStartupModal} from "./utils/modal.js";
 
 import {isProxy, ref} from "vue";
+import {createConsentModal} from "./utils/analytics-modal.js";
 const currentlySelectedDevice = ref('7g');
 const ipswLoaded = ref(false);
+const modifiedAssets = ref([]);
 
-createStartupModal();
+
+// createConsentModal();
+// createStartupModal();
+
+
+const contentPanelRef = ref(null);
+const handleCopyFromOrigin = () => {
+  contentPanelRef.value?.copyFromOriginAssets();
+};
+
 
 </script>
 
@@ -19,8 +30,22 @@ createStartupModal();
   <div id="app">
     <Navbar :device="currentlySelectedDevice" />
     <div class="container">
-      <ContentPanel :device="currentlySelectedDevice" v-model:loaded="ipswLoaded"/>
-      <ControlPanel :loaded="ipswLoaded" v-model:device="currentlySelectedDevice"/>
+
+
+      <ContentPanel
+          ref="contentPanelRef"
+          :device="currentlySelectedDevice"
+          v-model:loaded="ipswLoaded"
+          @modified-assets="modifiedAssets = $event"
+
+      />
+      <ControlPanel
+          :loaded="ipswLoaded"
+          :modified="modifiedAssets"
+          v-model:device="currentlySelectedDevice"
+          @copy-from-origin="handleCopyFromOrigin"
+
+      />
     </div>
   </div>
 </template>

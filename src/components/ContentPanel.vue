@@ -2,7 +2,9 @@
 import {defineProps, defineEmits, ref, computed} from 'vue';
 import {extractFilteredImages} from '../utils/unpack.js';
 import {
+  getGroupForAssetId,
   validAssetEndings,
+  groupMap,
   importantAssets,
   doNotShow
 } from '../utils/assetGroups.js';
@@ -32,31 +34,99 @@ const openFilePicker = () => {
 };
 
 const handleFile = async (event) => {
-  const file = event.target.files[0];
+  const file = event.target.files?.[0];
   if (!file) return;
 
-  const buffer = await file.arrayBuffer();
-
   try {
+    const buffer = await file.arrayBuffer();
+
     const jsonConfig = {
-      wallpapers_by_color: {}
+      wallpapers_by_color: {} // Still empty, unless needed
     };
 
-    const images = await extractFilteredImages(buffer, jsonConfig);
+    const rawImages = await extractFilteredImages(buffer, jsonConfig);
+
+    // Add `fullId` to each image (id + format)
+    const processedImages = rawImages.map(img => ({
+      ...img,
+      fullId: `${img.id}_${img.format.toString(16).padStart(4, '0')}`
+    }));
+
+    allImages.value = processedImages;
 
     emit('update:loaded', true);
-    allImages.value = images;
-    console.log('✅ Loaded images:', images);
+
+    console.log('✅ Loaded and processed images:', processedImages);
   } catch (err) {
-    console.error('❌ Failed to load IPSW:', err.message);
+    console.error('❌ Failed to load IPSW file:', err.message || err);
     emit('update:loaded', false);
   }
 };
 
-const loadStockAssets = () => {
-  emit('update:loaded', true);
-  // You could optionally populate allImages.value with mock data here
+
+import JSZip from 'jszip';
+
+const loadStockAssets = async () => {
+  try {
+    const response = await fetch('https://ipsw.zeehondie.net/unmodified.zip');
+    if (!response.ok) throw new Error(`Download failed: ${response.statusText}`);
+
+    const buffer = await response.arrayBuffer();
+    const zip = await JSZip.loadAsync(buffer);
+
+    const images = [];
+
+    for (const filename of Object.keys(zip.files)) {
+      if (!filename.toLowerCase().endsWith('.png')) continue;
+
+      const match = filename.match(/^(\d+)_([0-9a-fA-F]{4})\.png$/);
+      if (!match) continue;
+
+      const [, id, formatHex] = match;
+      const file = zip.files[filename];
+      const blob = await file.async('blob');
+      const dataURL = await blobToDataURL(blob);
+
+      // Optionally get dimensions
+      const {width, height} = await getImageSize(dataURL);
+
+      images.push({
+        id: parseInt(id),
+        format: parseInt(formatHex, 16),
+        fullId: `${id}_${formatHex.toLowerCase()}`,
+        dataURL,
+        width,
+        height
+      });
+    }
+
+    allImages.value = images;
+    emit('update:loaded', true);
+    emit('modified-assets', []); // no modified yet, unless you copy-to-modified by default
+
+    console.log(`📦 Loaded ${images.length} PNGs from stock ZIP`);
+  } catch (err) {
+    console.error('❌ Failed to load stock PNGs:', err);
+    emit('update:loaded', false);
+  }
 };
+
+const blobToDataURL = (blob) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
+  });
+};
+
+const getImageSize = (dataURL) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({width: img.width, height: img.height});
+    img.src = dataURL;
+  });
+};
+
 
 const openReplacePicker = (img) => {
   replacingImage.value = img;
@@ -90,6 +160,11 @@ const replaceAsset = async (event) => {
       };
     }
 
+    // 🔥 Emit all modified assets
+    emit(
+        'modified-assets',
+        allImages.value.filter(i => i.modifiedDataURL)
+    );
 
     replacingImage.value = null;
     event.target.value = null;
@@ -97,6 +172,7 @@ const replaceAsset = async (event) => {
     console.error('❌ Failed to replace asset:', err);
   }
 };
+
 
 const categorizedImages = computed(() => {
   const categoryIds = importantAssets[selectedCategory.value] || [];
@@ -111,6 +187,58 @@ const categorizedImages = computed(() => {
           idSet.has(img.fullId) && !doNotShow.includes(img.fullId)
       );
 });
+
+
+const copyFromOriginAssets = () => {
+  allImages.value = allImages.value.map(img => ({
+    ...img,
+    modifiedDataURL: img.dataURL
+  }));
+
+  emit(
+      'modified-assets',
+      allImages.value.filter(i => i.modifiedDataURL)
+  );
+
+  console.log('📝 All original assets copied to modified.');
+};
+
+defineExpose({copyFromOriginAssets});
+
+const syncToGroup = (sourceImg) => {
+  if (!sourceImg.modifiedDataURL) return;
+
+  const groupKey = getGroupForAssetId(sourceImg.fullId);
+  if (!groupKey) {
+    console.warn(`🔍 No group found for ${sourceImg.fullId}`);
+    return;
+  }
+
+  const groupIds = groupMap[groupKey];
+
+  allImages.value = allImages.value.map(img => {
+    if (
+        groupIds.includes(img.fullId) &&
+        img.fullId !== sourceImg.fullId
+    ) {
+      return {
+        ...img,
+        modifiedDataURL: sourceImg.modifiedDataURL
+      };
+    }
+    return img;
+  });
+
+  // Re-emit updated modified images
+  emit(
+      'modified-assets',
+      allImages.value.filter(i => i.modifiedDataURL)
+  );
+
+  console.log(`✅ Synced ${sourceImg.fullId} to group "${groupKey}"`);
+};
+
+
 </script>
 
 <template>
@@ -134,9 +262,9 @@ const categorizedImages = computed(() => {
       <!-- Upload section -->
       <div class="uploadSection" v-if="!props.loaded">
         <input type="file" ref="fileInput" @change="handleFile" style="display: none"/>
-        <a class="uploadButton" @click="openFilePicker">Upload IPSW</a>
+        <a class="btn-pri uploadButton" @click="openFilePicker">Upload IPSW</a>
         <p>-- OR --</p>
-        <a class="loadStockButton" @click="loadStockAssets">Use stock assets</a>
+        <a class="btn-alt loadStockButton" @click="loadStockAssets">Use stock assets</a>
       </div>
 
       <!-- Filtered image section -->
@@ -185,7 +313,7 @@ const categorizedImages = computed(() => {
               </div>
 
               <!-- ID and buttons -->
-              <a class="syncButton" v-if="selectedCategory === 'Wallpapers'">Sync to group</a>
+              <a class="syncButton" v-if="selectedCategory === 'Wallpapers'" @click="syncToGroup(img)">Sync to group</a>
               <a class="replaceButton" @click="openReplacePicker(img)">Replace Asset</a>
             </div>
           </div>

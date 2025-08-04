@@ -1,6 +1,6 @@
 // modal.js
 export function createStartupModal() {
-    if (localStorage.getItem('popupShown') === 'true') return;
+    // if (localStorage.getItem('popupShown') === 'true') return;
 
     const popupModal = document.createElement('div');
     popupModal.className = 'popup-modal';

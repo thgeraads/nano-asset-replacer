@@ -22,3 +22,21 @@ h1, h2, h3, h4, h5, h6, p, a{
     background-color: red !important;
 }
 
+
+.btn-pri{
+    transition: color 0.1s ease-in-out, background-color 0.1s ease-in-out;
+}
+
+.btn-pri:hover:not(.disabled){
+    background-color: #0056b3 !important;
+    color: white !important;
+}
+
+.btn-alt{
+    transition: color 0.1s ease-in-out, background-color 0.1s ease-in-out;
+}
+.btn-alt:hover{
+    background-color: #007bff !important;
+    color: white !important;
+}
+
