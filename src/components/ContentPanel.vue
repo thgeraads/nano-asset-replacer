@@ -8,7 +8,9 @@ import {
   importantAssets,
   doNotShow
 } from '../utils/assetGroups.js';
+import {reactive} from 'vue';
 
+const colorInfoMap = reactive({});
 const props = defineProps({
   device: {
     type: String,
@@ -133,8 +135,10 @@ const openReplacePicker = (img) => {
   imageInput.value?.click();
 };
 
+import RgbQuant from 'rgbquant';
+
 const replaceAsset = async (event) => {
-  const file = event.target.files[0];
+  const file = event.target.files?.[0];
   if (!file || !replacingImage.value) return;
 
   try {
@@ -147,7 +151,26 @@ const replaceAsset = async (event) => {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(imgBitmap, 0, 0, canvas.width, canvas.height);
 
-    const resizedDataURL = canvas.toDataURL('image/png');
+    const format = original.fullId.split('_')[1];
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    if (format === '0064' || format === '0065') {
+      const maxColors = format === '0064' ? 255 : 65535;
+      const before = countUniqueColors(imgData);
+      const quantized = quantizeWithRgbQuant(imgData, maxColors);
+      ctx.putImageData(quantized, 0, 0);
+      const after = countUniqueColors(quantized);
+
+      colorInfoMap[original.fullId] = `${before} to ${after} colors`;
+      console.log(`🎨 ${original.fullId}: ${before} to ${after} colors`);
+    } else {
+      const colorCount = countUniqueColors(imgData);
+      colorInfoMap[original.fullId] = `Original colors: ${colorCount}`;
+      console.log(`🎨 No quantization needed, colors: ${colorCount}`);
+    }
+
+
+    const finalDataURL = canvas.toDataURL('image/png');
 
     const index = allImages.value.findIndex(
         i => `${i.id}_${i.format.toString(16).padStart(4, '0')}` === original.fullId
@@ -156,11 +179,10 @@ const replaceAsset = async (event) => {
     if (index !== -1) {
       allImages.value[index] = {
         ...allImages.value[index],
-        modifiedDataURL: resizedDataURL
+        modifiedDataURL: finalDataURL
       };
     }
 
-    // 🔥 Emit all modified assets
     emit(
         'modified-assets',
         allImages.value.filter(i => i.modifiedDataURL)
@@ -168,6 +190,7 @@ const replaceAsset = async (event) => {
 
     replacingImage.value = null;
     event.target.value = null;
+
   } catch (err) {
     console.error('❌ Failed to replace asset:', err);
   }
@@ -205,8 +228,11 @@ const copyFromOriginAssets = () => {
 
 defineExpose({copyFromOriginAssets});
 
-const syncToGroup = (sourceImg) => {
-  if (!sourceImg.modifiedDataURL) return;
+const syncToGroup = async (sourceImg) => {
+  if (!sourceImg || !sourceImg.modifiedDataURL) {
+    console.warn('⚠️ syncToGroup called without a valid image');
+    return;
+  }
 
   const groupKey = getGroupForAssetId(sourceImg.fullId);
   if (!groupKey) {
@@ -216,27 +242,64 @@ const syncToGroup = (sourceImg) => {
 
   const groupIds = groupMap[groupKey];
 
-  allImages.value = allImages.value.map(img => {
-    if (
-        groupIds.includes(img.fullId) &&
-        img.fullId !== sourceImg.fullId
-    ) {
-      return {
-        ...img,
-        modifiedDataURL: sourceImg.modifiedDataURL
-      };
-    }
-    return img;
+  const srcImageBitmap = await createImageBitmap(await dataURLToBlob(sourceImg.modifiedDataURL));
+
+  const updatedImages = allImages.value.map((img) => {
+    if (!groupIds.includes(img.fullId) || img.fullId === sourceImg.fullId) return img;
+
+    // Draw resized image to fit destination canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(srcImageBitmap, 0, 0, canvas.width, canvas.height);
+
+    const resizedDataURL = canvas.toDataURL('image/png');
+
+    return {
+      ...img,
+      modifiedDataURL: resizedDataURL
+    };
   });
 
-  // Re-emit updated modified images
+  allImages.value = updatedImages;
+
   emit(
       'modified-assets',
-      allImages.value.filter(i => i.modifiedDataURL)
+      updatedImages.filter(i => i.modifiedDataURL)
   );
 
-  console.log(`✅ Synced ${sourceImg.fullId} to group "${groupKey}"`);
+  console.log(`✅ Synced resized image from ${sourceImg.fullId} to group "${groupKey}"`);
 };
+
+// Helper
+const dataURLToBlob = async (dataURL) => {
+  const res = await fetch(dataURL);
+  return await res.blob();
+};
+
+function quantizeWithRgbQuant(imageData, maxColors) {
+  const q = new RgbQuant({
+    colors: maxColors,
+    method: 2,
+    initColors: 4096,
+    minHueCols: 256,
+    dithKern: null
+  });
+
+  q.sample(imageData);
+  const rgbaArray = q.reduce(imageData, true);
+  return new ImageData(new Uint8ClampedArray(rgbaArray), imageData.width, imageData.height);
+}
+
+function countUniqueColors(imageData) {
+  const data = imageData.data;
+  const colors = new Set();
+  for (let i = 0; i < data.length; i += 4) {
+    colors.add(`${data[i]},${data[i + 1]},${data[i + 2]},${data[i + 3]}`);
+  }
+  return colors.size;
+}
 
 
 </script>
@@ -273,6 +336,7 @@ const syncToGroup = (sourceImg) => {
           <h3 class="groupTitle">{{ selectedCategory }}</h3>
           <div class="imageGrid">
             <div v-for="img in categorizedImages" :key="img.fullId" class="imageItem">
+              <p v-if="['229442319_0064', '229442320_0064', '229442322_0064', '229442323_0064'].includes(img.fullId)">(i) Neutral Grey</p>
               <p class="imageIdLabel">{{ img.fullId }}</p>
 
               <!-- Original image box -->
@@ -309,8 +373,10 @@ const syncToGroup = (sourceImg) => {
                       :style="{ width: img.width + 'px', height: img.height + 'px' }"
                   ></div>
                 </div>
-
               </div>
+              <p v-if="colorInfoMap[img.fullId]" class="colorInfo">
+                {{ colorInfoMap[img.fullId] }}
+              </p>
 
               <!-- ID and buttons -->
               <a class="syncButton" v-if="selectedCategory === 'Wallpapers'" @click="syncToGroup(img)">Sync to group</a>
