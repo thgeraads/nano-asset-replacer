@@ -198,7 +198,9 @@ const replaceAsset = async (event) => {
 
 
 const categorizedImages = computed(() => {
-  const categoryIds = importantAssets[selectedCategory.value] || [];
+  const categoryIds =
+      importantAssets[props.device]?.[selectedCategory.value] || [];
+
   const idSet = new Set(categoryIds);
 
   return allImages.value
@@ -210,6 +212,7 @@ const categorizedImages = computed(() => {
           idSet.has(img.fullId) && !doNotShow.includes(img.fullId)
       );
 });
+
 
 
 const copyFromOriginAssets = () => {
@@ -241,26 +244,41 @@ const syncToGroup = async (sourceImg) => {
   }
 
   const groupIds = groupMap[groupKey];
-
   const srcImageBitmap = await createImageBitmap(await dataURLToBlob(sourceImg.modifiedDataURL));
 
-  const updatedImages = allImages.value.map((img) => {
+  const updatedImages = await Promise.all(allImages.value.map(async (img) => {
     if (!groupIds.includes(img.fullId) || img.fullId === sourceImg.fullId) return img;
 
-    // Draw resized image to fit destination canvas
     const canvas = document.createElement('canvas');
     canvas.width = img.width;
     canvas.height = img.height;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(srcImageBitmap, 0, 0, canvas.width, canvas.height);
 
-    const resizedDataURL = canvas.toDataURL('image/png');
+    const formatHex = img.fullId.split('_')[1];
+    const format = parseInt(formatHex, 16);
+    let finalDataURL;
+
+    if (format === 0x0064 || format === 0x0065) {
+      const maxColors = format === 0x0064 ? 255 : 65535;
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      const quantized = quantizeWithRgbQuant(imgData, maxColors);
+      ctx.putImageData(quantized, 0, 0);
+      finalDataURL = canvas.toDataURL('image/png');
+
+      const before = countUniqueColors(imgData);
+      const after = countUniqueColors(quantized);
+      colorInfoMap[img.fullId] = `${before} to ${after} colors (synced)`;
+    } else {
+      finalDataURL = canvas.toDataURL('image/png');
+    }
 
     return {
       ...img,
-      modifiedDataURL: resizedDataURL
+      modifiedDataURL: finalDataURL
     };
-  });
+  }));
 
   allImages.value = updatedImages;
 
@@ -269,8 +287,9 @@ const syncToGroup = async (sourceImg) => {
       updatedImages.filter(i => i.modifiedDataURL)
   );
 
-  console.log(`✅ Synced resized image from ${sourceImg.fullId} to group "${groupKey}"`);
+  console.log(`✅ Synced resized + quantized image from ${sourceImg.fullId} to group "${groupKey}"`);
 };
+
 
 // Helper
 const dataURLToBlob = async (dataURL) => {
@@ -310,7 +329,7 @@ function countUniqueColors(imageData) {
     <div class="assetTypeBar" v-if="props.loaded">
       <div class="categoryTabs">
         <button
-            v-for="category in Object.keys(importantAssets)"
+            v-for="category in Object.keys(importantAssets[props.device])"
             :key="category"
             :class="{ active: category === selectedCategory }"
             @click="selectedCategory = category"
@@ -324,7 +343,7 @@ function countUniqueColors(imageData) {
     <div class="assetContainer">
       <!-- Upload section -->
       <div class="uploadSection" v-if="!props.loaded">
-        <input type="file" ref="fileInput" @change="handleFile" style="display: none"/>
+        <input accept=".ipsw" type="file" ref="fileInput" @change="handleFile" style="display: none"/>
         <a class="btn-pri uploadButton" @click="openFilePicker">Upload IPSW</a>
         <p>-- OR --</p>
         <a class="btn-alt loadStockButton" @click="loadStockAssets">Use stock assets</a>
@@ -334,6 +353,7 @@ function countUniqueColors(imageData) {
       <div class="assetSection" v-if="props.loaded">
         <div class="groupSection">
           <h3 class="groupTitle">{{ selectedCategory }}</h3>
+          <p class="disclaimerText" v-if="selectedCategory === 'Wallpapers' && props.device === '6g'">Yes, i am aware the alignment of the tiles is a bit wonky!</p>
           <div class="imageGrid">
             <div v-for="img in categorizedImages" :key="img.fullId" class="imageItem">
               <p v-if="['229442319_0064', '229442320_0064', '229442322_0064', '229442323_0064'].includes(img.fullId)">(i) Neutral Grey</p>
@@ -379,7 +399,7 @@ function countUniqueColors(imageData) {
               </p>
 
               <!-- ID and buttons -->
-              <a class="syncButton" v-if="selectedCategory === 'Wallpapers'" @click="syncToGroup(img)">Sync to group</a>
+              <a class="syncButton" v-if="selectedCategory === 'Wallpapers' && props.device === '7g'" @click="syncToGroup(img)">Sync to group</a>
               <a class="replaceButton" @click="openReplacePicker(img)">Replace Asset</a>
             </div>
           </div>
@@ -400,6 +420,14 @@ function countUniqueColors(imageData) {
 
 
 <style scoped>
+
+.disclaimerText{
+  color: #7c7c7c;
+  font-size: 0.9rem;
+  margin-top: 8px;
+  text-align: center;
+}
+
 .imageIdLabel {
   margin-top: 4px;
 }

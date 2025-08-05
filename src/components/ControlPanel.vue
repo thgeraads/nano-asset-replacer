@@ -1,6 +1,16 @@
 <script setup>
 import {ref} from 'vue';
 import JSZip from 'jszip';
+import { buildIPSW } from '../utils/build.js';
+
+const isBuilding = ref(false);
+const buildStatus = ref('');
+
+const build6G = () => buildIPSW('6g', props.modified, props.device, (msg) => buildStatus.value = msg, (v) => isBuilding.value = v);
+const build7G_2012 = () => buildIPSW('2012', props.modified, props.device, (msg) => buildStatus.value = msg, (v) => isBuilding.value = v);
+const build7G_2015 = () => buildIPSW('2015', props.modified, props.device, (msg) => buildStatus.value = msg, (v) => isBuilding.value = v);
+
+
 
 const props = defineProps({
   device: {
@@ -96,18 +106,21 @@ const copyFromOrigin = () => {
       <div class="buildButtons">
         <a v-if="props.device === '6g'"
            class="btn-pri buildButton"
+            @click="build6G"
            :class="{disabled: !props.loaded }"
         >
           Build for 6G
         </a>
         <a v-if="props.device === '7g'"
            class="btn-pri buildButton"
+            @click="build7G_2012"
            :class="{disabled: !props.loaded }">
           Build 7G (2012)
         </a>
         <a
             v-if="props.device === '7g'"
             class="btn-pri buildButton"
+            @click="build7G_2015"
             :class="{disabled: !props.loaded }">
           Build 7G (2015)
         </a>
