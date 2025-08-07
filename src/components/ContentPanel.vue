@@ -70,7 +70,17 @@ import JSZip from 'jszip';
 
 const loadStockAssets = async () => {
   try {
-    const response = await fetch('https://ipsw.zeehondie.net/unmodified.zip');
+    let url;
+    if(props.device === '6g') {
+      url = 'https://ipsw.zeehondie.net/stock6g.zip';
+    }
+    else if(props.device === '7g') {
+      url = 'https://ipsw.zeehondie.net/unmodified.zip';
+    } else {
+      throw new Error(`Unsupported device: ${props.device}`);
+    }
+
+    const response = await fetch(url);
     if (!response.ok) throw new Error(`Download failed: ${response.statusText}`);
 
     const buffer = await response.arrayBuffer();
@@ -354,6 +364,8 @@ function countUniqueColors(imageData) {
         <div class="groupSection">
           <h3 class="groupTitle">{{ selectedCategory }}</h3>
           <p class="disclaimerText" v-if="selectedCategory === 'Wallpapers' && props.device === '6g'">Yes, i am aware the alignment of the tiles is a bit wonky!</p>
+          <p class="disclaimerText" v-if="selectedCategory === 'Other' && props.device === '7g'">Yes, i am aware the alignment of the tiles is a bit wonky!</p>
+          <p class="disclaimerText" v-if="selectedCategory === 'Other' && props.device === '6g'">Yes, i am aware the alignment of the tiles is a bit wonky!</p>
           <div class="imageGrid">
             <div v-for="img in categorizedImages" :key="img.fullId" class="imageItem">
               <p v-if="['229442319_0064', '229442320_0064', '229442322_0064', '229442323_0064'].includes(img.fullId)">(i) Neutral Grey</p>
